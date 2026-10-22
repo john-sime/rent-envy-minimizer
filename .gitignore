@@ -44,3 +44,7 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.bak
+
+# User valuation inputs
+inputs/*.json
+!inputs/example.json

@@ -1,86 +1,54 @@
 # Rent Envy Minimizer
 
-A Python tool for fairly allocating three bedrooms and splitting rent between three housemates.
+A small Python CLI for allocating three bedrooms and splitting rent between three housemates in a way that minimises **maximum envy**.
 
-Each housemate independently submits their own valuation of the three rooms. The algorithm considers every possible allocation of rooms and searches for a rent split that minimises the maximum envy experienced by any housemate.
+Each housemate independently values the three rooms. The program converts those valuations into relative room premiums, evaluates all six possible room allocations, searches for the fairest premium/discount split for each allocation, and recommends the allocation with the lowest achievable maximum envy.
 
-The final result recommends:
+## Core idea
 
-- who should receive each room;
-- the premium or discount associated with each room;
-- the resulting rent payable by each housemate; and
-- the level of envy associated with the optimal solution.
+Suppose the final negotiated rent for a property is `R`.
 
-## Motivation
+Each room ultimately costs:
 
-Bedrooms in a shared property are rarely identical.
+```text
+R / 3 + p_i
+```
 
-One room might be larger, another might have an en-suite, and another might have worse storage or natural light. Splitting the total rent equally therefore does not necessarily produce a fair outcome.
+where `p_i` is the premium or discount attached to room `i`.
 
-Rather than negotiating room values after deciding who gets each room, each housemate privately evaluates all three rooms.
+The room premiums always satisfy:
 
-The algorithm then attempts to find the room allocation and rent split that makes everyone as satisfied as possible with their own deal relative to the alternatives.
+```text
+p_1 + p_2 + p_3 = 0
+```
 
-## Room Naming
-
-Rooms are identified generically as:
-
-- `room_1`
-- `room_2`
-- `room_3`
-
-The three housemates should agree which physical bedroom corresponds to each identifier before submitting their valuations.
-
-Housemates are similarly identified as:
-
-- `friend_1`
-- `friend_2`
-- `friend_3`
+so any saving or increase in the negotiated total rent is shared equally through the `R / 3` component.
 
 ## Valuations
 
-Each friend independently submits a monetary valuation for each room.
+Each friend independently submits a valuation for `room_1`, `room_2`, and `room_3`.
+
+The submitted values do **not** need to sum to the advertised rent, or even to the same total as another friend's valuations. Only the relative differences matter.
+
+For a friend's valuations:
+
+```text
+v_1, v_2, v_3
+```
+
+their mean valuation is:
+
+```text
+mean = (v_1 + v_2 + v_3) / 3
+```
+
+and their subjective premium for room `i` is:
+
+```text
+x_i = v_i - mean
+```
 
 For example:
-
-```text
-friend_1:
-    room_1: 1200
-    room_2: 1000
-    room_3: 800
-```
-
-The valuations do **not** need to sum to the property's advertised rent.
-
-A friend should simply provide values that represent the relative amounts they believe the rooms are worth.
-
-For friend `j`, let their submitted valuations be:
-
-```text
-v_j1, v_j2, v_j3
-```
-
-Their mean room valuation is:
-
-```text
-mean_j = (v_j1 + v_j2 + v_j3) / 3
-```
-
-Each valuation is converted into a subjective room premium:
-
-```text
-x_ji = v_ji - mean_j
-```
-
-Therefore:
-
-```text
-x_j1 + x_j2 + x_j3 = 0
-```
-
-Only the relative valuations of the rooms matter.
-
-For example, the submission:
 
 ```text
 1200, 1000, 800
@@ -92,309 +60,124 @@ becomes:
 +200, 0, -200
 ```
 
-## Actual Room Premiums
-
-The algorithm searches for actual premiums or discounts:
+while:
 
 ```text
-p_1, p_2, p_3
+1700, 1500, 1300
 ```
 
-subject to:
+produces exactly the same subjective premiums.
+
+## Envy
+
+For a friend, the perceived deal value of room `i` is:
 
 ```text
-p_1 + p_2 + p_3 = 0
+subjective premium - actual premium
 ```
 
-Only two dimensions therefore need to be searched explicitly:
+If that friend is allocated room `a`, their envy of another room `i` is:
 
 ```text
-p_3 = -p_1 - p_2
+deal_value(i) - deal_value(a)
 ```
 
-If the final negotiated rent for the property is `R`, the actual rent for room `i` is:
+Their personal maximum envy is the larger envy value across the two alternative rooms.
+
+The program then defines:
 
 ```text
-rent_i = R / 3 + p_i
+maximum envy = max(friend_1 envy, friend_2 envy, friend_3 envy)
 ```
 
-Negotiating the total rent does not change the premiums and discounts implied by the friends' valuations.
+and minimises that value.
 
-For example, if the advertised rent is £3,000 but the final negotiated rent is £2,700, the £300 saving reduces the base share of each housemate by £100.
+Importantly, envy is **not** clamped to zero.
 
-## Premium Bounds
+Therefore:
 
-No room may have a negative rent.
+- positive maximum envy means at least one friend prefers another room/deal;
+- zero means the allocation is envy-free, but someone is indifferent between their own room and another;
+- negative means every friend strictly prefers their own allocated room;
+- more negative is better.
+
+## Premium bounds
+
+A room cannot have negative rent.
 
 Because:
 
 ```text
-rent_i = R / 3 + p_i
+room rent = R / 3 + p_i
 ```
 
-each premium is bounded by:
+each room premium is constrained to:
 
 ```text
 -R / 3 <= p_i <= 2R / 3
 ```
 
-The lower bound corresponds to a room with zero rent.
+The lower bound corresponds to a room costing £0.
 
-The upper bound corresponds to one room carrying the entire rent while the other two rooms have zero rent.
+The upper bound corresponds to one room carrying the entire property rent while the other two rooms cost £0.
 
-Candidate solutions outside these bounds are invalid.
+## Search strategy
 
-## Deal Value
+There are only six possible assignments of three rooms to three friends.
 
-For friend `j`, the perceived deal value of room `i` is:
+For each allocation, the program performs a coarse-to-fine exhaustive search over room premiums.
 
-```text
-D_ji = x_ji - p_i
-```
+### Coarse search
 
-where:
+The full valid premium space is searched in £10 increments.
 
-- `x_ji` is that friend's subjective premium for the room; and
-- `p_i` is the actual premium charged for the room.
-
-A positive deal value means the friend believes the room is cheap relative to their valuation.
-
-A negative deal value means they believe it is expensive relative to their valuation.
-
-## Envy
-
-Suppose friend `j` is allocated room `a(j)`.
-
-Their envy of room `i` is:
+Because:
 
 ```text
-E_ji = D_ji - D_j,a(j)
+p_3 = -(p_1 + p_2)
 ```
 
-The friend's maximum envy is their most attractive alternative room:
+only `p_1` and `p_2` need to be searched independently.
 
-```text
-E_j = max(E_ji for all i != a(j))
-```
+Candidates are rejected if the derived premium for any room falls outside the valid rent bounds.
 
-The overall maximum envy for a candidate solution is:
+### Fine search
 
-```text
-E_max = max(E_1, E_2, E_3)
-```
+Every tied coarse optimum is retained.
 
-The objective of the algorithm is to **minimise `E_max`**.
+The program then searches the union of the surrounding regions using £1 increments.
 
-Importantly, envy is not clamped to zero.
+This avoids arbitrarily refining around only one coarse optimum.
 
-Therefore:
+### Multiple optimal premium splits
 
-```text
-E_max > 0
-```
+If several fine-grid premium combinations have the same minimum maximum-envy score, the program finds the two tied optimum points furthest apart and selects their midpoint as the representative premium split.
 
-means at least one friend would prefer another room at the proposed prices.
+This allows outputs ending in 50p where appropriate.
 
-```text
-E_max = 0
-```
+The maximum envy is then recalculated using the representative midpoint actually returned.
 
-means the allocation is envy-free, but at least one friend is indifferent between their own room and an alternative.
+## Allocation ties
 
-```text
-E_max < 0
-```
+More than one room allocation can occasionally achieve the same best maximum-envy score.
 
-means every friend strictly prefers their own allocated room to either alternative.
+When this happens:
 
-A more negative maximum-envy score is therefore preferable.
+1. all tied best allocations are retained;
+2. the CLI prints a warning;
+3. the program selects a deterministic recommendation using lexicographic order.
 
-## Room Allocations
+This effectively favours lower-indexed friends in lower-indexed rooms where equivalent solutions exist.
 
-There are three friends and three rooms, giving:
-
-```text
-3! = 6
-```
-
-possible allocations.
-
-The algorithm evaluates all six.
-
-For each allocation, it finds the premium/discount combination that minimises maximum envy.
-
-The globally preferred solution is the allocation with the lowest achievable maximum envy.
-
-## Search Strategy
-
-The initial implementation uses an exhaustive coarse-to-fine grid search.
-
-### Stage 1: Coarse Search
-
-Search the valid premium space in increments of:
-
-```text
-£10
-```
-
-Because the premiums sum to zero, only two premiums need to be independently searched.
-
-For every candidate:
-
-```text
-p_3 = -p_1 - p_2
-```
-
-The candidate is discarded if any room premium lies outside:
-
-```text
-[-R/3, 2R/3]
-```
-
-The maximum envy is calculated for every valid candidate.
-
-### Stage 2: Fine Search
-
-The regions surrounding the best coarse-grid solution or solutions are searched again using increments of:
-
-```text
-£1
-```
-
-This produces the final minimum maximum-envy score for that room allocation.
-
-If multiple adjacent £10 coarse-grid points are optimal, the fine search should cover the union of the neighbourhoods surrounding all coarse optima rather than refining around an arbitrary single point.
-
-## Multiple Optimal Premium Splits
-
-It is possible for multiple premium combinations to produce the same minimum maximum-envy score.
-
-The algorithm retains the optimal region rather than arbitrarily selecting the first point encountered during the search.
-
-Where a continuum or range of equally optimal solutions exists, the algorithm selects the midpoint as the representative premium split.
-
-A midpoint ending in 50 pence is acceptable even though the main fine search uses £1 increments.
-
-The selected premiums must continue to satisfy:
-
-```text
-p_1 + p_2 + p_3 = 0
-```
-
-## Allocation Ties
-
-More than one room allocation may occasionally produce an equivalent optimal result, particularly where friends have identical or equivalent room preferences.
-
-When an allocation tie occurs, the program should:
-
-1. report that an equivalent allocation exists;
-2. apply a deterministic tie-break; and
-3. prefer the lower-indexed friend in the lower-indexed room where the symmetry permits this.
-
-This ensures repeated runs produce the same recommendation.
-
-## Final Rent Calculation
-
-Once the optimal allocation and room premiums have been selected, the final negotiated property rent `R` is applied.
-
-For each room:
-
-```text
-rent_i = R / 3 + p_i
-```
-
-The final rents must sum to exactly `R`.
-
-Example:
-
-```text
-Final negotiated rent: £2,700
-
-Base share: £900
-
-room_1 premium:  +£150
-room_2 premium:   -£50
-room_3 premium:  -£100
-```
-
-produces:
-
-```text
-room_1: £1,050
-room_2:   £850
-room_3:   £800
-----------------
-total:  £2,700
-```
-
-## CLI
-
-The first version of the project will use a command-line interface.
-
-The intended workflow is:
-
-1. The three friends inspect the property.
-2. They agree which bedrooms are `room_1`, `room_2`, and `room_3`.
-3. Each friend privately submits their valuation of the three rooms.
-4. The valuations are collected outside this program.
-5. The valuations are supplied to the CLI.
-6. The final negotiated rent is supplied.
-7. The algorithm evaluates all six room allocations.
-8. The recommended allocation and rent split are displayed.
-
-A future CLI might resemble:
-
-```bash
-rent-envy solve valuations.json --rent 2700
-```
-
-The exact input format and CLI syntax will be finalised during implementation.
-
-## Intended Output
-
-The output should show the recommended allocation prominently, for example:
-
-```text
-RECOMMENDED ALLOCATION
-----------------------
-
-friend_1 -> room_2
-friend_2 -> room_1
-friend_3 -> room_3
-
-ROOM RENTS
-----------
-
-room_1: £1,050
-room_2:   £850
-room_3:   £800
-
-PREMIUMS / DISCOUNTS
---------------------
-
-room_1: +£150
-room_2:  -£50
-room_3: -£100
-
-MAXIMUM ENVY
-------------
-
--£18
-
-ENVY FREE
-```
-
-For completeness, the program should also report the optimal result for each of the six possible room allocations rather than displaying only the globally recommended allocation.
-
-## Project Structure
-
-The intended initial structure is:
+## Repository structure
 
 ```text
 rent-envy-minimizer/
 ├── .gitignore
 ├── README.md
 ├── pyproject.toml
+├── inputs/
+│   └── example.json
 ├── src/
 │   └── rent_envy_minimizer/
 │       ├── __init__.py
@@ -405,43 +188,217 @@ rent-envy-minimizer/
 │       ├── solver.py
 │       └── cli.py
 └── tests/
+    ├── test_models.py
     ├── test_valuations.py
     ├── test_envy.py
     ├── test_search.py
-    └── test_solver.py
+    ├── test_solver.py
+    └── test_cli.py
 ```
 
-The core algorithm should remain independent of the CLI so that other interfaces can be added later without changing the optimisation logic.
+## Installation
 
-## Development
+The project currently requires Python 3.13 or later.
 
-Install the project in editable mode with the development dependencies:
+Create and activate a virtual environment, then install the package in editable mode with its development dependencies:
 
 ```bash
 python -m pip install -e ".[dev]"
 ```
 
-Run the tests with:
+This installs the `rent-envy` command defined in `pyproject.toml`.
+
+## Input files
+
+Place property valuation files in:
+
+```text
+inputs/
+```
+
+Only `inputs/example.json` should be committed to the repository.
+
+Actual valuation files should remain local and are ignored by Git.
+
+The expected JSON structure is:
+
+```json
+{
+  "friend_1": {
+    "room_1": 1200,
+    "room_2": 1000,
+    "room_3": 800
+  },
+  "friend_2": {
+    "room_1": 900,
+    "room_2": 1250,
+    "room_3": 850
+  },
+  "friend_3": {
+    "room_1": 800,
+    "room_2": 900,
+    "room_3": 1300
+  }
+}
+```
+
+Before collecting valuations, the three friends should agree which physical bedroom is `room_1`, `room_2`, and `room_3`.
+
+The valuations can use round numbers and do not need to total the advertised rent.
+
+## Usage
+
+If the valuation file is:
+
+```text
+inputs/property.json
+```
+
+run:
+
+```bash
+rent-envy solve property.json --rent 2700
+```
+
+The filename is resolved implicitly inside the `inputs/` directory.
+
+Do **not** pass the directory itself:
+
+```text
+rent-envy solve inputs/property.json --rent 2700
+```
+
+is intentionally rejected.
+
+The CLI expects only the filename:
+
+```text
+rent-envy solve property.json --rent 2700
+```
+
+If the file cannot be found, the CLI asks the user to place it in the `inputs/` folder and refers them to `inputs/example.json`.
+
+## Output
+
+The CLI displays:
+
+- the recommended friend-to-room allocation;
+- the final rent payable for each room;
+- the premium or discount for each room;
+- the recommended allocation's maximum-envy score;
+- whether the result is strictly envy-free, envy-free, or still contains envy;
+- a warning if multiple allocations tie for the best result; and
+- the optimal premiums and maximum-envy score for all six room allocations.
+
+A representative result may look like:
+
+```text
+RECOMMENDED ALLOCATION
+----------------------
+friend_1 -> room_2
+friend_2 -> room_1
+friend_3 -> room_3
+
+ROOM RENTS
+----------
+room_1: £1,050.00
+room_2: £850.00
+room_3: £800.00
+
+PREMIUMS / DISCOUNTS
+--------------------
+room_1: +£150.00
+room_2: -£50.00
+room_3: -£100.00
+
+MAXIMUM ENVY
+------------
+-£18.00
+Result: STRICTLY ENVY FREE
+```
+
+## Negotiated rent
+
+The friends' subjective room premiums are independent of the final negotiated property rent.
+
+For example, suppose the advertised rent is £3,000 and the agreed relative room premiums are:
+
+```text
+room_1: +£150
+room_2: -£50
+room_3: -£100
+```
+
+If the final negotiated rent is £2,700, the base share becomes:
+
+```text
+£2,700 / 3 = £900
+```
+
+so the final room rents are:
+
+```text
+room_1: £1,050
+room_2: £850
+room_3: £800
+```
+
+The £300 saving from negotiation is therefore shared equally as a £100 reduction in each friend's base share.
+
+## Validation
+
+The CLI validates:
+
+- that the requested input file exists in `inputs/`;
+- that the filename has a `.json` extension;
+- that the JSON is syntactically valid;
+- that all three required friends are present;
+- that all three rooms are present for each friend;
+- that valuation values are valid finite numbers;
+- that there are no unexpected top-level friend fields; and
+- that the final negotiated rent is a positive finite number.
+
+Invalid input exits cleanly with a user-facing error message.
+
+## Tests
+
+Run the full test suite with:
 
 ```bash
 pytest
 ```
 
-Run linting with:
+The suite covers:
+
+- domain models and invariants;
+- valuation normalisation;
+- deal values and envy calculations;
+- premium bounds and grid generation;
+- coarse and fine search behaviour;
+- midpoint handling;
+- all six room allocations;
+- solver tie-breaking;
+- CLI parsing, validation and output; and
+- an end-to-end CLI path using the real solver.
+
+## Linting
+
+Run Ruff with:
 
 ```bash
 ruff check .
 ```
 
-## Design Principles
+## Design principles
 
-The initial implementation should favour:
+The first version intentionally favours:
 
-- simple and transparent mathematics;
+- transparent mathematics;
 - deterministic results;
-- exhaustive evaluation over opaque optimisation;
-- comprehensive unit tests;
-- minimal dependencies;
-- separation between the optimisation engine and user interface.
+- exhaustive search over opaque optimisation;
+- exact decimal arithmetic for money;
+- clear separation between models, calculations, search, orchestration and CLI;
+- minimal runtime dependencies; and
+- comprehensive tests around the fairness logic.
 
-The problem is intentionally small enough that clarity and auditability are more important than optimising computational performance.
+The problem is small enough that clarity and auditability are more important than micro-optimising compute performance.
